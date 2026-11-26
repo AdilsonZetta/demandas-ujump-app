@@ -49,6 +49,9 @@
         <button type="button" role="tab" data-filter="todas" aria-selected="false" tabindex="-1">
           Todas <span class="count" data-count="all">–</span>
         </button>
+        <button type="button" role="tab" class="tab-approve" data-filter="aprovar" aria-selected="false" tabindex="-1">
+          Aguardando aprovação <span class="count" data-count="approval">0</span>
+        </button>
       </div>
       <label class="search">
         <span class="sr">Buscar por ID, demanda ou próximo passo</span>
@@ -62,13 +65,32 @@
     <p id="result-meta" class="result-meta" hidden></p>
     <main id="list" class="list"></main>
     <footer class="foot">
-      <p>A lista é a aba Acompanhamento. Os números do topo vêm do resumo da planilha.</p>
+      <p id="foot">A lista é a aba Acompanhamento. Os números do topo vêm do resumo da planilha.</p>
     </footer>
+    <div id="pin-dialog" class="dialog" hidden>
+      <form id="pin-form" class="dialog-card">
+        <h2>PIN de aprovação</h2>
+        <p>Ele fica só neste celular. Quem publicou o Apps Script define o PIN nas propriedades do script.</p>
+        <label>
+          PIN
+          <input id="pin-input" type="password" inputmode="numeric" autocomplete="off" required>
+        </label>
+        <label>
+          Seu nome
+          <input id="pin-name" type="text" maxlength="80" autocomplete="name" placeholder="Opcional">
+        </label>
+        <div class="dialog-actions">
+          <button type="button" id="pin-cancel" class="btn-reject">Cancelar</button>
+          <button type="submit" class="btn-approve">Guardar</button>
+        </div>
+      </form>
+    </div>
     <p id="live" class="sr" role="status"></p>
   </div>
   <noscript>
     <p>Ative o JavaScript para ler as demandas da planilha.</p>
   </noscript>
+  <script src="config.js"></script>
   <script src="logic.js" defer></script>
   <script src="app.js" defer></script>
 </body>

@@ -10,9 +10,13 @@
     filter: "ativas",
     query: "",
     expanded: Object.create(null),
+    drafts: Object.create(null),
     model: null,
     offline: false,
     loading: false,
+    savingId: "",
+    notice: "",
+    noticeTone: "",
   };
 
   var els = {};
@@ -138,6 +142,8 @@
     return {
       items: items,
       summary: model.summary || {},
+      requests: model.requests || [],
+      requestsReady: !!model.requestsReady,
       updated: model.updated || (model.summary && model.summary.updated) || "",
       savedAt: model.savedAt || null,
       headerFound: model.headerFound !== false,
@@ -154,11 +160,20 @@
     }
     return {
       items: parsed.items,
+      requests: parsed.requests || [],
+      requestsReady: !!parsed.requestsReady,
       summary: summary,
       updated: summary.updated || parsed.updated || "",
       savedAt: new Date().toISOString(),
       headerFound: true,
     };
+  }
+
+  function withRequests(model, requestTable) {
+    var parsed = logic.parseRequests(requestTable);
+    model.requests = parsed.items;
+    model.requestsReady = parsed.headerFound;
+    return model;
   }
 
   async function fetchModel() {
@@ -173,7 +188,13 @@
       }
     }
     var demandTable = await loadSheet("Acompanhamento");
-    return buildModel(summaryTable, demandTable);
+    var requestTable = null;
+    try {
+      requestTable = await loadSheet("Solicitações");
+    } catch (e) {
+      requestTable = null;
+    }
+    return withRequests(buildModel(summaryTable, demandTable), requestTable);
   }
 
   function canPing() {
@@ -325,7 +346,7 @@
 
   function renderCard(item) {
     var key = itemKey(item);
-    var card = el("article", "card" + (item.due.kind === "overdue" ? " is-overdue" : item.due.kind === "today" || item.due.kind === "soon" ? " is-soon" : ""));
+    var card = el("article", "card" + dueClass(item.due.kind));
     var main = el("div", "card-main");
     var top = el("div", "card-top");
     top.appendChild(el("p", "demand-id", item.id || "—"));
@@ -372,6 +393,288 @@
     return card;
   }
 
+  function dueClass(kind) {
+    if (kind === "overdue") return " is-overdue";
+    if (kind === "today") return " is-today";
+    if (kind === "tomorrow") return " is-tomorrow";
+    if (kind === "soon") return " is-soon";
+    return "";
+  }
+
+  function webAppUrl() {
+    var config = window.UJUMP_CONFIG || {};
+    return String(config.approvalWebAppUrl || "").trim();
+  }
+
+  function approvalsEnabled() {
+    return /^https:\/\/script\.google\.com\/macros\/s\/.+\/exec\/?$/.test(webAppUrl());
+  }
+
+  function storedPin() {
+    try { return localStorage.getItem("ujump-approval-pin") || ""; } catch (e) { return ""; }
+  }
+
+  function storedName() {
+    try { return localStorage.getItem("ujump-approver-name") || ""; } catch (e) { return ""; }
+  }
+
+  function askPin() {
+    return new Promise(function (resolve, reject) {
+      var dialog = $("pin-dialog");
+      var form = $("pin-form");
+      var input = $("pin-input");
+      var name = $("pin-name");
+      var cancel = $("pin-cancel");
+      dialog.hidden = false;
+      input.value = "";
+      name.value = storedName();
+      input.focus();
+      function close(pin) {
+        dialog.hidden = true;
+        form.onsubmit = null;
+        cancel.onclick = null;
+        if (pin) resolve(pin);
+        else reject(new Error("cancelado"));
+      }
+      form.onsubmit = function (event) {
+        event.preventDefault();
+        var pin = input.value.trim();
+        if (!pin) return;
+        var person = name.value.trim();
+        try {
+          localStorage.setItem("ujump-approval-pin", pin);
+          if (person) localStorage.setItem("ujump-approver-name", person);
+        } catch (e) { /* segue sem persistir */ }
+        close(pin);
+      };
+      cancel.onclick = function () { close(""); };
+    });
+  }
+
+  function postApproval(url, payload) {
+    return fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(payload),
+    }).then(function (response) {
+      if (!response || response.type === "opaque") throw new Error("sem leitura");
+      return response.text();
+    }).then(function (text) {
+      return JSON.parse(text);
+    });
+  }
+
+  function jsonpApproval(url, payload) {
+    return new Promise(function (resolve, reject) {
+      var cb = "__ujumpApproval" + Math.random().toString(36).slice(2);
+      var params = new URLSearchParams();
+      params.set("action", payload.action);
+      params.set("id", payload.id);
+      params.set("pin", payload.pin || "");
+      params.set("name", payload.name || "");
+      params.set("comment", payload.comment || "");
+      params.set("callback", cb);
+      var script = document.createElement("script");
+      var timer = setTimeout(function () {
+        cleanup();
+        reject(new Error("O Apps Script demorou para responder."));
+      }, 20000);
+      function cleanup() {
+        clearTimeout(timer);
+        try { delete window[cb]; } catch (e) { window[cb] = undefined; }
+        if (script.parentNode) script.parentNode.removeChild(script);
+      }
+      window[cb] = function (data) {
+        cleanup();
+        resolve(data);
+      };
+      script.onerror = function () {
+        cleanup();
+        reject(new Error("Não consegui falar com o Apps Script."));
+      };
+      script.src = url + (url.indexOf("?") === -1 ? "?" : "&") + params.toString();
+      document.head.appendChild(script);
+    });
+  }
+
+  function callApproval(payload) {
+    var url = webAppUrl();
+    return postApproval(url, payload).catch(function () {
+      return jsonpApproval(url, payload);
+    });
+  }
+
+  async function decide(action, request) {
+    if (!approvalsEnabled() || state.savingId) return;
+    var draft = state.drafts[request.id] || {};
+    var name = (draft.name != null ? draft.name : storedName()).trim();
+    var comment = (draft.comment || "").trim();
+    state.savingId = request.id;
+    state.notice = "";
+    renderList();
+    try {
+      var pin = storedPin();
+      if (!pin) pin = await askPin();
+      var result = await callApproval({ action: action, id: request.id, pin: pin, name: name, comment: comment });
+      if (result && result.code === "pin") {
+        try { localStorage.removeItem("ujump-approval-pin"); } catch (e) { /* ignore */ }
+        pin = await askPin();
+        result = await callApproval({ action: action, id: request.id, pin: pin, name: name, comment: comment });
+      }
+      if (!result || result.ok === false) {
+        throw new Error((result && result.error) || "Não foi possível salvar a decisão.");
+      }
+      if (name) {
+        try { localStorage.setItem("ujump-approver-name", name); } catch (e) { /* ignore */ }
+      }
+      state.noticeTone = "";
+      state.notice = action === "approve"
+        ? request.id + " aprovado" + (result.itemId ? " e incluído como " + result.itemId + "." : ".")
+        : request.id + " recusado.";
+      state.savingId = "";
+      await requestRefresh({ quiet: true });
+    } catch (error) {
+      state.savingId = "";
+      if (error && error.message === "cancelado") {
+        renderList();
+        return;
+      }
+      state.noticeTone = "error";
+      state.notice = error && error.message ? error.message : "Não foi possível salvar a decisão.";
+      renderList();
+    }
+  }
+
+  function requestCard(request) {
+    var card = el("article", "card");
+    var main = el("div", "card-main");
+    var top = el("div", "card-top");
+    top.appendChild(el("p", "demand-id", request.id || "Novo"));
+    var tone = request.state === "approved" ? "done" : request.state === "rejected" ? "rejected" : "todo";
+    top.appendChild(el("p", "badge badge-" + tone, request.status));
+    main.appendChild(top);
+    main.appendChild(el("h2", "title", request.title));
+    var meta = [];
+    if (request.person) meta.push(request.person);
+    if (request.askedOn) meta.push("pedido em " + request.askedOn);
+    if (meta.length) main.appendChild(el("p", "meta", meta.join(" · ")));
+    if (request.detail) main.appendChild(el("p", "detail", request.detail));
+    if (request.decidedBy || request.decidedOn || request.createdId) {
+      var decision = [];
+      if (request.decidedBy) decision.push(request.decidedBy);
+      if (request.decidedOn) decision.push(request.decidedOn);
+      var line = decision.join(" · ");
+      if (request.createdId) line = (line ? line + " · " : "") + "item " + request.createdId;
+      main.appendChild(el("p", "meta", line));
+    }
+    if (request.note) main.appendChild(el("p", "meta", request.note));
+    card.appendChild(main);
+
+    if (request.state === "pending") {
+      var draft = state.drafts[request.id] || {};
+      var nameField = el("label", "field", "Seu nome");
+      var nameInput = document.createElement("input");
+      nameInput.type = "text";
+      nameInput.maxLength = 80;
+      nameInput.placeholder = "Opcional";
+      nameInput.value = draft.name != null ? draft.name : storedName();
+      nameInput.addEventListener("input", function () {
+        state.drafts[request.id] = state.drafts[request.id] || {};
+        state.drafts[request.id].name = nameInput.value;
+      });
+      nameField.appendChild(nameInput);
+      var noteField = el("label", "field", "Comentário");
+      var noteInput = document.createElement("textarea");
+      noteInput.maxLength = 2000;
+      noteInput.placeholder = "Opcional";
+      noteInput.value = draft.comment || "";
+      noteInput.addEventListener("input", function () {
+        state.drafts[request.id] = state.drafts[request.id] || {};
+        state.drafts[request.id].comment = noteInput.value;
+      });
+      noteField.appendChild(noteInput);
+      card.appendChild(nameField);
+      card.appendChild(noteField);
+      var actions = el("div", "actions");
+      var approve = document.createElement("button");
+      approve.type = "button";
+      approve.className = "btn-approve";
+      approve.textContent = state.savingId === request.id ? "Salvando…" : "Aprovar";
+      var reject = document.createElement("button");
+      reject.type = "button";
+      reject.className = "btn-reject";
+      reject.textContent = "Recusar";
+      var enabled = approvalsEnabled() && state.savingId !== request.id;
+      approve.disabled = !enabled;
+      reject.disabled = !enabled;
+      approve.addEventListener("click", function () { decide("approve", request); });
+      reject.addEventListener("click", function () { decide("reject", request); });
+      actions.appendChild(approve);
+      actions.appendChild(reject);
+      card.appendChild(actions);
+    }
+    return card;
+  }
+
+  function renderApprovals() {
+    var requests = state.model.requests || [];
+    var counts = logic.requestCounts(requests);
+    document.querySelector('[data-count="approval"]').textContent = String(counts.pending);
+    var button = document.querySelector('[data-filter="aprovar"]');
+    if (button) button.classList.toggle("has-queue", counts.pending > 0);
+    var shown = logic.filterRequests(requests, state.query);
+    var pending = shown.filter(function (item) { return item.state === "pending"; });
+    var decided = shown.filter(function (item) { return item.state !== "pending"; });
+    els.resultMeta.hidden = false;
+    els.resultMeta.textContent = counts.pending === 1
+      ? "1 pedido aguardando aprovação"
+      : counts.pending + " pedidos aguardando aprovação";
+    els.hint.hidden = true;
+    els.q.placeholder = "Buscar pedido";
+    if (els.foot) {
+      els.foot.textContent = "Aprovar grava o pedido e cria o próximo P-xx em Acompanhamento, como A fazer.";
+    }
+    els.list.replaceChildren();
+    if (!approvalsEnabled()) {
+      els.list.appendChild(el("p", "approve-note", "Os botões ficam desligados até o endereço /exec do Apps Script ser colado em config.js."));
+    } else if (!storedPin()) {
+      var pinNote = el("p", "approve-note", "Na primeira decisão, o app pede o PIN e guarda neste celular.");
+      els.list.appendChild(pinNote);
+    } else {
+      var forget = document.createElement("button");
+      forget.type = "button";
+      forget.className = "linkish";
+      forget.textContent = "Esquecer PIN deste celular";
+      forget.addEventListener("click", function () {
+        try { localStorage.removeItem("ujump-approval-pin"); } catch (e) { /* ignore */ }
+        renderList();
+      });
+      els.list.appendChild(forget);
+    }
+    if (state.notice) {
+      var note = el("p", state.noticeTone === "error" ? "card-error" : "approve-note", state.notice);
+      els.list.appendChild(note);
+    }
+    if (!state.model.requestsReady) {
+      var missing = el("div", "empty");
+      missing.appendChild(el("p", "empty-title", "A aba Solicitações ainda não está na planilha."));
+      missing.appendChild(el("p", "", "No Apps Script, execute a função setupSolicitacoes."));
+      els.list.appendChild(missing);
+      return;
+    }
+    if (!shown.length) {
+      var empty = el("div", "empty");
+      empty.appendChild(el("p", "empty-title", state.query.trim() ? "Nenhum pedido encontrado." : "Nenhum pedido para aprovar."));
+      els.list.appendChild(empty);
+      return;
+    }
+    pending.forEach(function (item) { els.list.appendChild(requestCard(item)); });
+    if (decided.length) {
+      els.list.appendChild(el("p", "section-label", "Já decididas"));
+      decided.forEach(function (item) { els.list.appendChild(requestCard(item)); });
+    }
+  }
+
   function visibleItems() {
     return logic.filterItems(state.model.items, state.filter, state.query);
   }
@@ -379,10 +682,23 @@
   function renderList() {
     var items = state.model.items;
     var totals = logic.counts(items);
+    var approval = logic.requestCounts(state.model.requests || []);
     document.querySelectorAll("[data-count]").forEach(function (node) {
       var key = node.getAttribute("data-count");
-      node.textContent = String(totals[key] == null ? 0 : totals[key]);
+      if (key === "approval") node.textContent = String(approval.pending);
+      else node.textContent = String(totals[key] == null ? 0 : totals[key]);
     });
+    var approveTab = document.querySelector('[data-filter="aprovar"]');
+    if (approveTab) approveTab.classList.toggle("has-queue", approval.pending > 0);
+    if (state.filter === "aprovar") {
+      renderApprovals();
+      els.live.textContent = els.resultMeta.textContent;
+      return;
+    }
+    els.q.placeholder = "Buscar por ID ou demanda";
+    if (els.foot) {
+      els.foot.textContent = "A lista é a aba Acompanhamento. Os números do topo vêm do resumo da planilha.";
+    }
     var shown = visibleItems();
     var filterLabel = state.filter === "ativas" ? "ativas" : state.filter === "concluidas" ? "concluídas" : "no total";
     if (state.query.trim()) {
@@ -400,15 +716,23 @@
 
     var activeShown = shown.filter(function (item) { return !item.closed; });
     var hasRealDate = activeShown.some(function (item) {
-      return item.due.kind === "overdue" || item.due.kind === "today" || item.due.kind === "soon" || item.due.kind === "later";
+      return item.due.kind === "overdue" || item.due.kind === "today" || item.due.kind === "tomorrow" || item.due.kind === "soon" || item.due.kind === "later";
     });
     var hasConfirm = activeShown.some(function (item) { return item.due.kind === "confirm"; });
     var overdueCount = activeShown.filter(function (item) { return item.due.kind === "overdue"; }).length;
+    var todayCount = activeShown.filter(function (item) { return item.due.kind === "today"; }).length;
+    var tomorrowCount = activeShown.filter(function (item) { return item.due.kind === "tomorrow"; }).length;
     if (overdueCount > 0) {
       els.hint.hidden = false;
       els.hint.textContent = overdueCount === 1
         ? "1 demanda atrasada."
         : overdueCount + " demandas atrasadas.";
+    } else if (todayCount > 0 && state.filter !== "concluidas" && !state.query.trim()) {
+      els.hint.hidden = false;
+      els.hint.textContent = todayCount === 1 ? "1 vence hoje." : todayCount + " vencem hoje.";
+    } else if (tomorrowCount > 0 && state.filter !== "concluidas" && !state.query.trim()) {
+      els.hint.hidden = false;
+      els.hint.textContent = tomorrowCount === 1 ? "1 vence amanhã." : tomorrowCount + " vencem amanhã.";
     } else if (state.filter !== "concluidas" && !state.query.trim() && hasConfirm && !hasRealDate && activeShown.length) {
       els.hint.hidden = false;
       els.hint.textContent = "As datas de conclusão seguem a confirmar até serem combinadas.";
@@ -609,6 +933,7 @@
       live: $("live"),
       ptr: $("ptr"),
       tabs: document.querySelector(".tabs"),
+      foot: $("foot"),
     };
     bind();
     selectFilter("ativas");

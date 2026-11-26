@@ -16,8 +16,21 @@ function testClassify() {
   assert.strictEqual(overdue.hint, "Atrasada há 3 dias");
   assert.strictEqual(L.classifyDue("26/11/2026", TODAY).kind, "today");
   assert.strictEqual(L.classifyDue("27/11/2026", TODAY).hint, "Vence amanhã");
+  assert.strictEqual(L.classifyDue("27/11/2026", TODAY).kind, "tomorrow");
+  assert.strictEqual(L.classifyDue("27/11/2026", TODAY).label, "27/11");
+  assert.strictEqual(L.classifyDue("26/11/2026", TODAY).label, "26/11");
+  assert.strictEqual(L.classifyDue("30/11/2026", TODAY).label, "30/11");
+  assert.strictEqual(L.classifyDue("30/11/2026", TODAY).hint, "Vence em 4 dias");
   assert.strictEqual(L.classifyDue("02/12/2026", TODAY).kind, "soon");
   assert.strictEqual(L.classifyDue("20/12/2026", TODAY).kind, "later");
+  assert.strictEqual(L.classifyDue("20/12/2026", TODAY).label, "20/12");
+  assert.strictEqual(L.dueForItem("", true, TODAY).label, "Não informada");
+  assert.strictEqual(L.dueForItem("", false, TODAY).label, "A confirmar");
+  const serial = Math.round((Date.UTC(2026, 10, 30) - Date.UTC(1899, 11, 30)) / 86400000);
+  assert.strictEqual(L.cellText({ v: serial }), "30/11/2026");
+  assert.strictEqual(L.cellText({ v: "Date(2026,10,26)" }), "26/11/2026");
+  const reclassified = L.reclassify([{ id: "P-01", status: "Concluído", dueRaw: "", title: "Feito", order: 0 }], TODAY);
+  assert.strictEqual(reclassified[0].due.label, "Não informada");
   assert.strictEqual(L.isClosed("Concluído"), true);
   assert.strictEqual(L.isClosed("A fazer"), false);
   assert.strictEqual(L.isClosed("Não concluído"), false);
@@ -119,12 +132,40 @@ async function testLiveSheet() {
   assert.strictEqual(totals.active, 29, "ativas na aba Acompanhamento");
   assert.strictEqual(totals.closed, 4, "concluídas na aba Acompanhamento");
   assert.strictEqual(parsed.items[0].id, "P-05");
-  assert.strictEqual(parsed.items[0].due.kind, "confirm");
+  assert.strictEqual(parsed.items[0].due.kind, "soon");
+  assert.strictEqual(parsed.items[0].due.label, "30/11");
   assert.ok(parsed.items[0].next.length > 20);
   assert.strictEqual(parsed.items[0].title.indexOf("bilheteria") !== -1, true);
+  parsed.items.filter(function (item) { return item.closed; }).forEach(function (item) {
+    assert.strictEqual(item.due.label, "Não informada", item.id);
+    assert.strictEqual(item.due.kind, "missing");
+  });
+  const open = L.filterItems(parsed.items, "ativas", "");
+  assert.strictEqual(open[0].due.kind, "today");
+  open.forEach(function (item) {
+    assert.ok(["today", "tomorrow", "soon"].indexOf(item.due.kind) !== -1, item.id + " " + item.due.kind);
+    assert.match(item.due.label, /^\d{2}\/\d{2}$/);
+  });
   const active = L.filterItems(parsed.items, "ativas", "instagram");
   assert.strictEqual(active.length, 1);
   assert.strictEqual(active[0].id, "P-11");
+  const missingSheet = L.parseRequests(resumo);
+  assert.strictEqual(missingSheet.headerFound, false);
+  const requests = L.parseRequests({
+    cols: ["ID", "Data do pedido", "Solicitante", "Demanda", "Descrição", "Status", "Aprovado por", "Data da decisão", "Observação", "Item criado"].map(function (label) {
+      return { label: label };
+    }),
+    rows: [
+      row(["S-01", "26/11/2026", "Fred", "Relatório por operador", "Quer ver quem vendeu.", "Aguardando aprovação", "", "", "", ""]),
+      row(["", "", "", "", "", "", "", "", "", ""]),
+      row(["S-02", "25/11/2026", "Ana", "Bloqueio temporário", "", "Aprovada", "Adilson", "26/11/2026", "", "P-34"]),
+    ],
+  });
+  assert.strictEqual(requests.headerFound, true);
+  assert.strictEqual(requests.items.length, 2);
+  assert.strictEqual(requests.items[0].state, "pending");
+  assert.strictEqual(requests.items[1].createdId, "P-34");
+  assert.strictEqual(L.requestCounts(requests.items).pending, 1);
 }
 
 (async function main() {
