@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#1b4332">
+  <meta name="theme-color" content="#1e4634" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#101412" media="(prefers-color-scheme: dark)">
   <meta name="description" content="Acompanhamento das demandas de Eventos UJUMP, com situação, prazo e próximo passo.">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -22,39 +23,23 @@
 </head>
 <body>
   <div class="app">
-    <header class="hero">
-      <p class="brand">Grupo Zetta | Eventos UJUMP</p>
-      <div class="hero-row">
-        <h1>Demandas</h1>
-        <button id="refresh" type="button">
-          <svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true">
-            <path d="M16.5 10a6.5 6.5 0 1 1-1.7-4.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-            <path d="M16.6 3.8v3.4h-3.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          <span>Atualizar</span>
-        </button>
+    <header class="topbar">
+      <div class="topbar-copy">
+        <p class="brand">Grupo Zetta | Eventos UJUMP</p>
+        <h1 id="screen-title">Demandas</h1>
       </div>
-      <p id="updated" class="updated">Carregando a planilha…</p>
-      <div id="summary" class="summary" hidden></div>
+      <button id="refresh" type="button" aria-label="Atualizar">
+        <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M20 12a8 8 0 1 1-2.1-5.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          <path d="M20 4.5V9h-4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
     </header>
 
-    <div class="tools">
-      <div class="tabs" role="tablist" aria-label="Filtrar demandas">
-        <button type="button" role="tab" data-filter="ativas" aria-selected="true">
-          Ativas <span class="count" data-count="active">–</span>
-        </button>
-        <button type="button" role="tab" data-filter="concluidas" aria-selected="false" tabindex="-1">
-          Concluídas <span class="count" data-count="closed">–</span>
-        </button>
-        <button type="button" role="tab" data-filter="todas" aria-selected="false" tabindex="-1">
-          Todas <span class="count" data-count="all">–</span>
-        </button>
-        <button type="button" role="tab" class="tab-approve" data-filter="aprovar" aria-selected="false" tabindex="-1">
-          Aguardando aprovação <span class="count" data-count="approval">0</span>
-        </button>
-      </div>
-      <label class="search">
-        <span class="sr">Buscar por ID, demanda ou próximo passo</span>
+    <div class="subbar" id="subbar">
+      <p id="updated" class="updated">Carregando a planilha…</p>
+      <label class="search" id="search-wrap">
+        <span class="sr">Buscar</span>
         <input id="q" type="search" placeholder="Buscar por ID ou demanda" autocomplete="off" enterkeyhint="search">
       </label>
     </div>
@@ -64,27 +49,51 @@
     <p id="hint" class="hint" hidden></p>
     <p id="result-meta" class="result-meta" hidden></p>
     <main id="list" class="list"></main>
-    <footer class="foot">
-      <p id="foot">A lista é a aba Acompanhamento. Os números do topo vêm do resumo da planilha.</p>
-    </footer>
-    <div id="pin-dialog" class="dialog" hidden>
-      <form id="pin-form" class="dialog-card">
-        <h2>PIN de aprovação</h2>
-        <p>Ele fica só neste celular. Quem publicou o Apps Script define o PIN nas propriedades do script.</p>
-        <label>
-          PIN
-          <input id="pin-input" type="password" inputmode="numeric" autocomplete="off" required>
+
+    <nav class="tabbar" role="tablist" aria-label="Seções">
+      <button type="button" role="tab" data-filter="ativas" aria-selected="true">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M4 6h.01M4 12h.01M4 18h.01" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+        <span>Ativas</span>
+      </button>
+      <button type="button" role="tab" data-filter="aprovar" aria-selected="false" tabindex="-1">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+        <span>Aguardando aprovação</span>
+        <em class="badge-count" data-count="approval" hidden>0</em>
+      </button>
+      <button type="button" role="tab" data-filter="concluidas" aria-selected="false" tabindex="-1">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8.5 12.2 11 14.7 15.7 9.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Concluídas</span>
+      </button>
+      <button type="button" role="tab" data-filter="resumo" aria-selected="false" tabindex="-1">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="13" y="4" width="7" height="7" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="4" y="13" width="7" height="7" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="13" y="13" width="7" height="7" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+        <span>Resumo</span>
+      </button>
+    </nav>
+
+    <div id="sheet" class="sheet" hidden>
+      <button type="button" class="sheet-backdrop" id="sheet-backdrop" aria-label="Fechar"></button>
+      <form id="sheet-form" class="sheet-panel">
+        <div class="sheet-handle" aria-hidden="true"></div>
+        <h2 id="sheet-title">Decisão</h2>
+        <p id="sheet-demand"></p>
+        <label>Seu nome
+          <input id="sheet-name" type="text" maxlength="80" autocomplete="name" placeholder="Opcional">
         </label>
-        <label>
-          Seu nome
-          <input id="pin-name" type="text" maxlength="80" autocomplete="name" placeholder="Opcional">
+        <label>Comentário
+          <textarea id="sheet-comment" maxlength="2000" placeholder="Opcional"></textarea>
         </label>
-        <div class="dialog-actions">
-          <button type="button" id="pin-cancel" class="btn-reject">Cancelar</button>
-          <button type="submit" class="btn-approve">Guardar</button>
+        <p id="sheet-pin-note" class="sheet-note" hidden>O PIN deste celular será usado. <button type="button" id="sheet-pin-change" class="linkish">Trocar</button></p>
+        <label id="sheet-pin-wrap">PIN
+          <input id="sheet-pin" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN de aprovação">
+        </label>
+        <div class="sheet-actions">
+          <button type="button" id="sheet-cancel" class="btn-quiet">Cancelar</button>
+          <button type="submit" id="sheet-ok" class="btn-approve">Confirmar</button>
         </div>
       </form>
     </div>
+
+    <div id="toast" class="toast" hidden role="status"></div>
     <p id="live" class="sr" role="status"></p>
   </div>
   <noscript>

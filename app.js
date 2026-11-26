@@ -211,7 +211,7 @@
     var button = els.refresh;
     button.disabled = loading;
     button.setAttribute("aria-busy", loading ? "true" : "false");
-    button.querySelector("span").textContent = loading ? "Atualizando" : "Atualizar";
+    button.setAttribute("aria-label", loading ? "Atualizando" : "Atualizar");
     button.classList.toggle("is-loading", loading);
   }
 
@@ -303,40 +303,56 @@
     return "neutral";
   }
 
-  function renderSummary(summary) {
-    els.summary.replaceChildren();
-    var chips = [
-      ["pending", summary.pending, "pendências"],
-      ["credits", summary.credits, "créditos"],
-      ["franchise", summary.franchise, "franquia"],
-      ["changes", summary.changes, "consolidadas"],
-      ["fixes", summary.fixes, "correções"],
-    ];
-    var any = false;
-    chips.forEach(function (chip) {
-      if (!chip[1]) return;
-      any = true;
-      var node = el("p", "chip chip-" + chip[0]);
-      if (chip[0] === "franchise") {
-        node.appendChild(document.createTextNode(chip[2] + " "));
-        node.appendChild(el("strong", "", chip[1]));
-      } else {
-        node.appendChild(el("strong", "", chip[1]));
-        node.appendChild(document.createTextNode(" " + chip[2]));
-      }
-      els.summary.appendChild(node);
-    });
-    els.summary.hidden = !any;
+  function emptyState(title, text) {
+    var box = el("div", "empty");
+    var icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.setAttribute("viewBox", "0 0 48 48");
+    icon.setAttribute("width", "48");
+    icon.setAttribute("height", "48");
+    icon.setAttribute("aria-hidden", "true");
+    icon.innerHTML = '<rect x="8" y="10" width="32" height="28" rx="6" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 22h16M16 28h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>';
+    box.appendChild(icon);
+    box.appendChild(el("p", "empty-title", title));
+    if (text) box.appendChild(el("p", "", text));
+    return box;
+  }
+
+  function renderResumo() {
+    var summary = state.model.summary || {};
+    var totals = logic.counts(state.model.items || []);
+    els.searchWrap.hidden = true;
+    els.hint.hidden = true;
+    els.resultMeta.hidden = true;
+    els.list.replaceChildren();
+    var grid = el("div", "stats");
+    function tile(label, value, wide) {
+      if (value == null || value === "") return;
+      var node = el("article", "stat" + (wide ? " stat-wide" : ""));
+      node.appendChild(el("span", "", label));
+      node.appendChild(el("strong", "", String(value)));
+      grid.appendChild(node);
+    }
+    tile("Pendências", summary.pending || totals.active);
+    tile("Concluídas na lista", totals.closed);
+    tile("Créditos estimados", summary.credits);
+    tile("Franquia por ciclo", summary.franchise);
+    tile("Alterações consolidadas", summary.changes, true);
+    tile("Correções", summary.fixes);
+    if (!grid.childElementCount) {
+      els.list.appendChild(emptyState("Resumo indisponível", "A aba Resumo da planilha não trouxe os números."));
+      return;
+    }
+    els.list.appendChild(grid);
+    els.live.textContent = "Resumo da planilha";
   }
 
   function renderDue(due) {
-    var node = el("p", "due due-" + due.kind);
-    if (due.hint && due.kind !== "confirm" && due.kind !== "missing" && due.kind !== "empty" && due.kind !== "text") {
-      node.appendChild(el("span", "due-hint", due.hint));
-      node.appendChild(el("span", "due-date", due.label));
-    } else {
-      node.textContent = due.label || "Sem data";
-    }
+    var node = el("p", "chip-due due-" + (due.kind || "empty"));
+    var text = due.label || "Sem data";
+    if (due.kind === "today") text = "Hoje · " + due.label;
+    else if (due.kind === "tomorrow") text = "Amanhã · " + due.label;
+    else if (due.kind === "soon" || due.kind === "overdue") text = due.hint || due.label;
+    node.textContent = text;
     return node;
   }
 
@@ -378,14 +394,15 @@
       chevron.appendChild(path);
       button.appendChild(label);
       button.appendChild(chevron);
-      var panel = el("div", "next");
-      panel.hidden = !open;
-      panel.appendChild(el("p", "", item.next));
+      var panel = el("div", "next" + (open ? " is-open" : ""));
+      var inner = el("div", "next-inner");
+      inner.appendChild(el("p", "", item.next));
+      panel.appendChild(inner);
       button.addEventListener("click", function () {
         state.expanded[key] = !state.expanded[key];
         var expanded = !!state.expanded[key];
         button.setAttribute("aria-expanded", expanded ? "true" : "false");
-        panel.hidden = !expanded;
+        panel.classList.toggle("is-open", expanded);
       });
       card.appendChild(button);
       card.appendChild(panel);
@@ -418,36 +435,71 @@
     try { return localStorage.getItem("ujump-approver-name") || ""; } catch (e) { return ""; }
   }
 
-  function askPin() {
+  function showToast(message, tone) {
+    var toast = $("toast");
+    toast.hidden = false;
+    toast.className = "toast " + (tone === "err" ? "err" : "ok");
+    toast.textContent = message;
+    clearTimeout(showToast.timer);
+    showToast.timer = setTimeout(function () { toast.hidden = true; }, 3400);
+  }
+
+  function closeSheet() {
+    var sheet = $("sheet");
+    sheet.classList.remove("is-open");
+    sheet.hidden = true;
+  }
+
+  function openDecisionSheet(action, request) {
     return new Promise(function (resolve, reject) {
-      var dialog = $("pin-dialog");
-      var form = $("pin-form");
-      var input = $("pin-input");
-      var name = $("pin-name");
-      var cancel = $("pin-cancel");
-      dialog.hidden = false;
-      input.value = "";
-      name.value = storedName();
-      input.focus();
-      function close(pin) {
-        dialog.hidden = true;
+      var sheet = $("sheet");
+      var form = $("sheet-form");
+      var pinWrap = $("sheet-pin-wrap");
+      var pinNote = $("sheet-pin-note");
+      var pinInput = $("sheet-pin");
+      var nameInput = $("sheet-name");
+      var commentInput = $("sheet-comment");
+      var hasPin = !!storedPin();
+      sheet.hidden = false;
+      $("sheet-title").textContent = (action === "approve" ? "Aprovar " : "Recusar ") + (request.id || "pedido");
+      $("sheet-demand").textContent = request.title || "";
+      $("sheet-ok").textContent = action === "approve" ? "Confirmar aprovação" : "Confirmar recusa";
+      $("sheet-ok").className = action === "approve" ? "btn-approve" : "btn-reject";
+      nameInput.value = storedName();
+      commentInput.value = "";
+      pinInput.value = "";
+      pinWrap.hidden = hasPin;
+      pinNote.hidden = !hasPin;
+      pinInput.required = !hasPin;
+      function finish(value) {
+        closeSheet();
         form.onsubmit = null;
-        cancel.onclick = null;
-        if (pin) resolve(pin);
+        $("sheet-cancel").onclick = null;
+        $("sheet-backdrop").onclick = null;
+        $("sheet-pin-change").onclick = null;
+        if (value) resolve(value);
         else reject(new Error("cancelado"));
       }
+      $("sheet-pin-change").onclick = function () {
+        pinWrap.hidden = false;
+        pinNote.hidden = true;
+        pinInput.required = true;
+        pinInput.focus();
+      };
       form.onsubmit = function (event) {
         event.preventDefault();
-        var pin = input.value.trim();
+        var pin = pinInput.value.trim() || storedPin();
         if (!pin) return;
-        var person = name.value.trim();
+        var name = nameInput.value.trim();
         try {
           localStorage.setItem("ujump-approval-pin", pin);
-          if (person) localStorage.setItem("ujump-approver-name", person);
-        } catch (e) { /* segue sem persistir */ }
-        close(pin);
+          if (name) localStorage.setItem("ujump-approver-name", name);
+        } catch (e) { /* segue sem gravar */ }
+        finish({ pin: pin, name: name, comment: commentInput.value.trim() });
       };
-      cancel.onclick = function () { close(""); };
+      $("sheet-cancel").onclick = function () { finish(null); };
+      $("sheet-backdrop").onclick = function () { finish(null); };
+      (hasPin ? nameInput : pinInput).focus();
     });
   }
 
@@ -506,41 +558,40 @@
 
   async function decide(action, request) {
     if (!approvalsEnabled() || state.savingId) return;
-    var draft = state.drafts[request.id] || {};
-    var name = (draft.name != null ? draft.name : storedName()).trim();
-    var comment = (draft.comment || "").trim();
+    var form;
+    try {
+      form = await openDecisionSheet(action, request);
+    } catch (error) {
+      return;
+    }
     state.savingId = request.id;
-    state.notice = "";
     renderList();
     try {
-      var pin = storedPin();
-      if (!pin) pin = await askPin();
-      var result = await callApproval({ action: action, id: request.id, pin: pin, name: name, comment: comment });
+      var result = await callApproval({
+        action: action,
+        id: request.id,
+        pin: form.pin,
+        name: form.name,
+        comment: form.comment,
+      });
       if (result && result.code === "pin") {
         try { localStorage.removeItem("ujump-approval-pin"); } catch (e) { /* ignore */ }
-        pin = await askPin();
-        result = await callApproval({ action: action, id: request.id, pin: pin, name: name, comment: comment });
+        showToast("PIN incorreto. Tente de novo.", "err");
+        state.savingId = "";
+        renderList();
+        return decide(action, request);
       }
       if (!result || result.ok === false) {
         throw new Error((result && result.error) || "Não foi possível salvar a decisão.");
       }
-      if (name) {
-        try { localStorage.setItem("ujump-approver-name", name); } catch (e) { /* ignore */ }
-      }
-      state.noticeTone = "";
-      state.notice = action === "approve"
-        ? request.id + " aprovado" + (result.itemId ? " e incluído como " + result.itemId + "." : ".")
-        : request.id + " recusado.";
+      showToast(action === "approve"
+        ? request.id + " aprovado" + (result.itemId ? " · " + result.itemId : "")
+        : request.id + " recusado.", "ok");
       state.savingId = "";
       await requestRefresh({ quiet: true });
     } catch (error) {
       state.savingId = "";
-      if (error && error.message === "cancelado") {
-        renderList();
-        return;
-      }
-      state.noticeTone = "error";
-      state.notice = error && error.message ? error.message : "Não foi possível salvar a decisão.";
+      showToast(error && error.message ? error.message : "Não foi possível salvar a decisão.", "err");
       renderList();
     }
   }
@@ -571,30 +622,6 @@
     card.appendChild(main);
 
     if (request.state === "pending") {
-      var draft = state.drafts[request.id] || {};
-      var nameField = el("label", "field", "Seu nome");
-      var nameInput = document.createElement("input");
-      nameInput.type = "text";
-      nameInput.maxLength = 80;
-      nameInput.placeholder = "Opcional";
-      nameInput.value = draft.name != null ? draft.name : storedName();
-      nameInput.addEventListener("input", function () {
-        state.drafts[request.id] = state.drafts[request.id] || {};
-        state.drafts[request.id].name = nameInput.value;
-      });
-      nameField.appendChild(nameInput);
-      var noteField = el("label", "field", "Comentário");
-      var noteInput = document.createElement("textarea");
-      noteInput.maxLength = 2000;
-      noteInput.placeholder = "Opcional";
-      noteInput.value = draft.comment || "";
-      noteInput.addEventListener("input", function () {
-        state.drafts[request.id] = state.drafts[request.id] || {};
-        state.drafts[request.id].comment = noteInput.value;
-      });
-      noteField.appendChild(noteInput);
-      card.appendChild(nameField);
-      card.appendChild(noteField);
       var actions = el("div", "actions");
       var approve = document.createElement("button");
       approve.type = "button";
@@ -631,9 +658,7 @@
       : counts.pending + " pedidos aguardando aprovação";
     els.hint.hidden = true;
     els.q.placeholder = "Buscar pedido";
-    if (els.foot) {
-      els.foot.textContent = "Aprovar grava o pedido e cria o próximo P-xx em Acompanhamento, como A fazer.";
-    }
+    els.searchWrap.hidden = false;
     els.list.replaceChildren();
     if (!approvalsEnabled()) {
       els.list.appendChild(el("p", "approve-note", "Os botões ficam desligados até o endereço /exec do Apps Script ser colado em config.js."));
@@ -650,10 +675,6 @@
         renderList();
       });
       els.list.appendChild(forget);
-    }
-    if (state.notice) {
-      var note = el("p", state.noticeTone === "error" ? "card-error" : "approve-note", state.notice);
-      els.list.appendChild(note);
     }
     if (!state.model.requestsReady) {
       var missing = el("div", "empty");
@@ -675,6 +696,26 @@
     }
   }
 
+  function dueGroups(items) {
+    var order = [
+      ["overdue", "Atrasadas"],
+      ["today", "Hoje"],
+      ["tomorrow", "Amanhã"],
+      ["soon", "Esta semana"],
+      ["later", "Depois"],
+      ["confirm", "A confirmar"],
+    ];
+    var buckets = {};
+    items.forEach(function (item) {
+      var kind = (item.due && item.due.kind) || "confirm";
+      if (kind === "missing" || kind === "empty" || kind === "text") kind = "confirm";
+      if (!buckets[kind]) buckets[kind] = [];
+      buckets[kind].push(item);
+    });
+    return order.filter(function (pair) { return buckets[pair[0]] && buckets[pair[0]].length; })
+      .map(function (pair) { return { title: pair[1], items: buckets[pair[0]] }; });
+  }
+
   function visibleItems() {
     return logic.filterItems(state.model.items, state.filter, state.query);
   }
@@ -685,20 +726,22 @@
     var approval = logic.requestCounts(state.model.requests || []);
     document.querySelectorAll("[data-count]").forEach(function (node) {
       var key = node.getAttribute("data-count");
-      if (key === "approval") node.textContent = String(approval.pending);
-      else node.textContent = String(totals[key] == null ? 0 : totals[key]);
+      if (key === "approval") {
+        node.textContent = String(approval.pending);
+        node.hidden = approval.pending === 0;
+      }
     });
-    var approveTab = document.querySelector('[data-filter="aprovar"]');
-    if (approveTab) approveTab.classList.toggle("has-queue", approval.pending > 0);
+    if (state.filter === "resumo") {
+      renderResumo();
+      return;
+    }
     if (state.filter === "aprovar") {
       renderApprovals();
       els.live.textContent = els.resultMeta.textContent;
       return;
     }
     els.q.placeholder = "Buscar por ID ou demanda";
-    if (els.foot) {
-      els.foot.textContent = "A lista é a aba Acompanhamento. Os números do topo vêm do resumo da planilha.";
-    }
+    els.searchWrap.hidden = false;
     var shown = visibleItems();
     var filterLabel = state.filter === "ativas" ? "ativas" : state.filter === "concluidas" ? "concluídas" : "no total";
     if (state.query.trim()) {
@@ -743,16 +786,21 @@
 
     els.list.replaceChildren();
     if (!shown.length) {
-      var empty = el("div", "empty");
-      empty.appendChild(el("p", "empty-title", state.query.trim() ? "Nenhuma demanda encontrada." : "Nenhuma demanda nesta lista."));
-      if (state.query.trim()) {
-        empty.appendChild(el("p", "", "Tente outro termo ou limpe a busca."));
-      }
-      els.list.appendChild(empty);
+      els.list.appendChild(emptyState(
+        state.query.trim() ? "Nenhuma demanda encontrada." : "Nenhuma demanda nesta lista.",
+        state.query.trim() ? "Tente outro termo ou limpe a busca." : ""
+      ));
       return;
     }
     var fragment = document.createDocumentFragment();
-    shown.forEach(function (item) { fragment.appendChild(renderCard(item)); });
+    if (state.filter === "ativas") {
+      dueGroups(shown).forEach(function (group) {
+        fragment.appendChild(el("h2", "group-label", group.title));
+        group.items.forEach(function (item) { fragment.appendChild(renderCard(item)); });
+      });
+    } else {
+      shown.forEach(function (item) { fragment.appendChild(renderCard(item)); });
+    }
     els.list.appendChild(fragment);
     els.live.textContent = els.resultMeta.textContent + " " + filterLabel;
   }
@@ -775,20 +823,23 @@
       els.banner.textContent = "";
       if (saved) els.updated.textContent += " · lido às " + saved.timeText;
     }
-    renderSummary(model.summary || {});
+    var titles = {
+      ativas: "Demandas",
+      aprovar: "Aguardando aprovação",
+      concluidas: "Concluídas",
+      resumo: "Resumo",
+    };
+    els.title.textContent = titles[state.filter] || "Demandas";
     renderList();
   }
 
   function renderFatal(error) {
     els.updated.textContent = "Não foi possível ler a planilha";
-    els.summary.hidden = true;
     els.banner.hidden = true;
     els.hint.hidden = true;
     els.resultMeta.hidden = true;
     els.list.replaceChildren();
-    var box = el("div", "empty");
-    box.appendChild(el("p", "empty-title", error && error.message ? error.message : "Não foi possível ler a planilha."));
-    box.appendChild(el("p", "", "Confira a conexão e tente de novo. A última versão fica disponível depois da primeira leitura."));
+    var box = emptyState(error && error.message ? error.message : "Não foi possível ler a planilha.", "Confira a conexão e tente de novo.");
     var retry = document.createElement("button");
     retry.type = "button";
     retry.className = "retry";
@@ -809,7 +860,7 @@
       button.setAttribute("aria-selected", selected ? "true" : "false");
       button.tabIndex = selected ? 0 : -1;
     });
-    if (state.model) renderList();
+    if (state.model) render();
   }
 
   function enableServiceWorker() {
@@ -924,16 +975,16 @@
     els = {
       refresh: $("refresh"),
       updated: $("updated"),
-      summary: $("summary"),
+      title: $("screen-title"),
       list: $("list"),
       q: $("q"),
+      searchWrap: $("search-wrap"),
       hint: $("hint"),
       banner: $("banner"),
       resultMeta: $("result-meta"),
       live: $("live"),
       ptr: $("ptr"),
-      tabs: document.querySelector(".tabs"),
-      foot: $("foot"),
+      tabs: document.querySelector(".tabbar"),
     };
     bind();
     selectFilter("ativas");
