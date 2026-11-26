@@ -155,6 +155,19 @@ h1 {
   background: #e5ece7;
 }
 
+.tab-approve {
+  grid-column: 1 / -1;
+  white-space: nowrap;
+}
+
+.tab-approve.has-queue .count {
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #9a4d12;
+  color: #fff;
+}
+
 .tabs button {
   min-height: 42px;
   border: 0;
@@ -245,7 +258,8 @@ h1 {
 }
 
 .card.is-overdue { box-shadow: inset 3px 0 0 var(--overdue), var(--shadow); }
-
+.card.is-today { box-shadow: inset 3px 0 0 #c2410c, var(--shadow); }
+.card.is-tomorrow { box-shadow: inset 3px 0 0 #d97706, var(--shadow); }
 .card.is-soon { box-shadow: inset 3px 0 0 #e0a100, var(--shadow); }
 
 .card-main { padding: 14px 14px 12px; }
@@ -299,7 +313,9 @@ h1 {
 .due-date { font-weight: 650; }
 
 .due-overdue { color: var(--overdue); }
-.due-today, .due-soon { color: var(--soon); }
+.due-today { color: #c2410c; }
+.due-tomorrow { color: #b45309; }
+.due-soon { color: var(--soon); }
 .due-later { color: var(--ink); }
 .due-missing, .due-empty, .due-text {
   padding: 4px 8px;
@@ -331,6 +347,15 @@ h1 {
   color: var(--muted);
   font-size: 13px;
 }
+
+.detail {
+  margin: 8px 0 0;
+  font-size: 15px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.badge-rejected { background: #fdecec; color: var(--overdue); }
 
 .next-toggle {
   display: flex;
@@ -390,6 +415,122 @@ h1 {
   color: #fff;
   font-weight: 750;
 }
+
+.approve-note, .section-label {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.section-label {
+  margin-top: 6px;
+  font-weight: 750;
+  color: var(--ink);
+}
+
+.field {
+  display: block;
+  margin: 0 14px 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.field input, .field textarea {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.field textarea { min-height: 64px; resize: vertical; }
+
+.actions {
+  display: flex;
+  gap: 8px;
+  padding: 0 14px 14px;
+}
+
+.btn-approve, .btn-reject {
+  flex: 1;
+  min-height: 44px;
+  border-radius: 12px;
+  font-weight: 750;
+}
+
+.btn-approve {
+  border: 0;
+  background: var(--brand);
+  color: #fff;
+}
+
+.btn-reject {
+  border: 1px solid #f0c2c2;
+  background: #fff;
+  color: var(--overdue);
+}
+
+.btn-approve:disabled, .btn-reject:disabled { opacity: 0.45; }
+
+.linkish {
+  margin: 0 14px 14px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--brand);
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.card-error {
+  margin: 0 14px 12px;
+  color: var(--overdue);
+  font-size: 13px;
+}
+
+.dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: end center;
+  padding: 16px;
+  background: rgba(26, 36, 32, 0.45);
+}
+
+.dialog[hidden] { display: none; }
+
+.dialog-card {
+  width: min(420px, 100%);
+  margin-bottom: env(safe-area-inset-bottom);
+  padding: 18px 16px 16px;
+  border-radius: 18px;
+  background: #fff;
+}
+
+.dialog-card h2 { margin: 0 0 8px; font-size: 22px; }
+.dialog-card p { margin: 0 0 12px; color: var(--muted); font-size: 14px; line-height: 1.4; }
+.dialog-card label { display: block; margin-bottom: 10px; font-size: 13px; font-weight: 700; color: var(--muted); }
+.dialog-card input {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 16px;
+}
+
+.dialog-actions { display: flex; gap: 8px; margin-top: 8px; }
 
 .foot {
   margin: 18px 16px 0;

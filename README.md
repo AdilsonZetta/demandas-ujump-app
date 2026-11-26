@@ -7,3 +7,5 @@ Grupo Zetta | Eventos UJUMP
 Endereço publicado: https://adilsonzetta.github.io/demandas-ujump-app/
 
 A lista é a aba Acompanhamento. Os números do topo vêm da aba Resumo. O CSV público não envia CORS; o app lê o endpoint gviz com `tqx=out:json;responseHandler:`, que responde JavaScript. O service worker busca a planilha na rede primeiro e só usa a última leitura quando não há conexão.
+
+A aba **Aguardando aprovação** lê **Solicitações**. Gravar a decisão exige o Apps Script em `apps-script/`. O endereço `/exec` fica em `config.js`. Enquanto estiver vazio, os botões ficam desligados. Um pedido aprovado entra em Acompanhamento como o próximo `P-xx`, situação `A fazer`.
