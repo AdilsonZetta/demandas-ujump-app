@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1b4332">
+  <meta name="description" content="Acompanhamento das demandas de Eventos UJUMP, com situação, prazo e próximo passo.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Demandas">
+  <title>Demandas UJUMP</title>
+  <script>
+    if (location.pathname === "/demandas-ujump-app") {
+      location.replace("/demandas-ujump-app/" + location.search + location.hash);
+    }
+  </script>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <header class="hero">
+      <p class="brand">Grupo Zetta | Eventos UJUMP</p>
+      <div class="hero-row">
+        <h1>Demandas</h1>
+        <button id="refresh" type="button">
+          <svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M16.5 10a6.5 6.5 0 1 1-1.7-4.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            <path d="M16.6 3.8v3.4h-3.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>Atualizar</span>
+        </button>
+      </div>
+      <p id="updated" class="updated">Carregando a planilha…</p>
+      <div id="summary" class="summary" hidden></div>
+    </header>
+
+    <div class="tools">
+      <div class="tabs" role="tablist" aria-label="Filtrar demandas">
+        <button type="button" role="tab" data-filter="ativas" aria-selected="true">
+          Ativas <span class="count" data-count="active">–</span>
+        </button>
+        <button type="button" role="tab" data-filter="concluidas" aria-selected="false" tabindex="-1">
+          Concluídas <span class="count" data-count="closed">–</span>
+        </button>
+        <button type="button" role="tab" data-filter="todas" aria-selected="false" tabindex="-1">
+          Todas <span class="count" data-count="all">–</span>
+        </button>
+      </div>
+      <label class="search">
+        <span class="sr">Buscar por ID, demanda ou próximo passo</span>
+        <input id="q" type="search" placeholder="Buscar por ID ou demanda" autocomplete="off" enterkeyhint="search">
+      </label>
+    </div>
+
+    <div id="ptr" class="ptr" aria-hidden="true">Puxe para atualizar</div>
+    <div id="banner" class="banner" role="status" hidden></div>
+    <p id="hint" class="hint" hidden></p>
+    <p id="result-meta" class="result-meta" hidden></p>
+    <main id="list" class="list"></main>
+    <footer class="foot">
+      <p>A lista é a aba Acompanhamento. Os números do topo vêm do resumo da planilha.</p>
+    </footer>
+    <p id="live" class="sr" role="status"></p>
+  </div>
+  <noscript>
+    <p>Ative o JavaScript para ler as demandas da planilha.</p>
+  </noscript>
+  <script src="logic.js" defer></script>
+  <script src="app.js" defer></script>
+</body>
+</html>
