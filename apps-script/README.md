@@ -4,6 +4,12 @@ O app no celular só lê a planilha. Quem grava a aprovação é este script, li
 
 Ao aprovar, o script marca a linha em **Solicitações** como `Aprovada` e cria o próximo item `P-xx` no topo de **Acompanhamento**, com situação `A fazer`. A data de conclusão fica em branco para você combinar depois. Recusar só atualiza a solicitação.
 
+A ação `complete` conclui uma demanda `P-xx`. Em **Acompanhamento** ela grava `Situação` = `Concluído` e `Data de conclusão` = hoje (America/Sao_Paulo). Em **Realizadas** ela acrescenta uma linha com o mesmo ID, o título, o próximo passo, `Sistema` = `Eventos UJUMP`, a data de hoje, `Situação` = `Concluído` e a observação de quem concluiu. Não preenche nível nem créditos, para não alterar a soma da franquia.
+
+O `health` continua devolvendo `ok` e `ready`, e também lista `actions`: `health`, `approve`, `reject`, `complete`.
+
+Para publicar esta versão sem trocar o URL: **Implantar → Gerenciar implantações → Editar (lápis) → Versão: Nova versão → Implantar**.
+
 ## 1. Colar o código
 
 1. Abra a planilha.

@@ -346,9 +346,14 @@
     els.live.textContent = "Resumo da planilha";
   }
 
-  function renderDue(due) {
+  function renderDue(due, closed) {
     var node = el("p", "chip-due due-" + (due.kind || "empty"));
     var text = due.label || "Sem data";
+    if (closed && due.label && due.kind !== "missing" && due.kind !== "empty" && due.kind !== "confirm") {
+      node.className = "chip-due due-missing";
+      node.textContent = "Concluída em " + due.label;
+      return node;
+    }
     if (due.kind === "today") text = "Hoje · " + due.label;
     else if (due.kind === "tomorrow") text = "Amanhã · " + due.label;
     else if (due.kind === "soon" || due.kind === "overdue") text = due.hint || due.label;
@@ -362,12 +367,12 @@
 
   function renderCard(item) {
     var key = itemKey(item);
-    var card = el("article", "card" + dueClass(item.due.kind));
+    var card = el("article", "card" + (item.closed ? "" : dueClass(item.due.kind)));
     var main = el("div", "card-main");
     var top = el("div", "card-top");
     top.appendChild(el("p", "demand-id", item.id || "—"));
     top.appendChild(el("p", "badge badge-" + statusTone(item.status), item.status));
-    top.appendChild(renderDue(item.due));
+    top.appendChild(renderDue(item.due, item.closed));
     main.appendChild(top);
     main.appendChild(el("h2", "title", item.title));
     if (item.registered) main.appendChild(el("p", "meta", "Registro " + item.registered));
@@ -407,6 +412,15 @@
       card.appendChild(button);
       card.appendChild(panel);
     }
+    if (!item.closed) {
+      var finish = document.createElement("button");
+      finish.type = "button";
+      finish.className = "btn-complete";
+      finish.textContent = state.savingId === item.id ? "Salvando…" : "Concluir";
+      finish.disabled = !approvalsEnabled() || state.savingId === item.id;
+      finish.addEventListener("click", function () { decide("complete", item); });
+      card.appendChild(finish);
+    }
     return card;
   }
 
@@ -435,6 +449,15 @@
     try { return localStorage.getItem("ujump-approver-name") || ""; } catch (e) { return ""; }
   }
 
+  function markCompleted(item) {
+    var today = logic.saoPauloToday();
+    var raw = String(today.getDate()).padStart(2, "0") + "/" + String(today.getMonth() + 1).padStart(2, "0") + "/" + today.getFullYear();
+    item.closed = true;
+    item.status = "Concluído";
+    item.dueRaw = raw;
+    item.due = logic.dueForItem(raw, true, today);
+  }
+
   function showToast(message, tone) {
     var toast = $("toast");
     toast.hidden = false;
@@ -461,10 +484,15 @@
       var commentInput = $("sheet-comment");
       var hasPin = !!storedPin();
       sheet.hidden = false;
-      $("sheet-title").textContent = (action === "approve" ? "Aprovar " : "Recusar ") + (request.id || "pedido");
+      var sheetCopy = {
+        approve: ["Aprovar ", "Confirmar aprovação", "btn-approve"],
+        reject: ["Recusar ", "Confirmar recusa", "btn-reject"],
+        complete: ["Concluir ", "Confirmar conclusão", "btn-approve"],
+      }[action] || ["Decidir ", "Confirmar", "btn-approve"];
+      $("sheet-title").textContent = sheetCopy[0] + (request.id || "pedido");
       $("sheet-demand").textContent = request.title || "";
-      $("sheet-ok").textContent = action === "approve" ? "Confirmar aprovação" : "Confirmar recusa";
-      $("sheet-ok").className = action === "approve" ? "btn-approve" : "btn-reject";
+      $("sheet-ok").textContent = sheetCopy[1];
+      $("sheet-ok").className = sheetCopy[2];
       nameInput.value = storedName();
       commentInput.value = "";
       pinInput.value = "";
@@ -584,10 +612,14 @@
       if (!result || result.ok === false) {
         throw new Error((result && result.error) || "Não foi possível salvar a decisão.");
       }
+      if (action === "complete") markCompleted(request);
       showToast(action === "approve"
         ? request.id + " aprovado" + (result.itemId ? " · " + result.itemId : "")
-        : request.id + " recusado.", "ok");
+        : action === "complete"
+          ? request.id + " concluída."
+          : request.id + " recusado.", "ok");
       state.savingId = "";
+      render();
       await requestRefresh({ quiet: true });
     } catch (error) {
       state.savingId = "";
