@@ -5,9 +5,12 @@
  */
 var REQUEST_SHEET = "Solicitações";
 var TRACKING_SHEET = "Acompanhamento";
+var DONE_SHEET = "Realizadas";
 var STATUS_PENDING = "Aguardando aprovação";
 var STATUS_APPROVED = "Aprovada";
 var STATUS_REJECTED = "Recusada";
+var STATUS_DONE = "Concluído";
+var ACTIONS = ["health", "approve", "reject", "complete"];
 var REQUEST_HEADERS = [
   "ID",
   "Data do pedido",
@@ -72,13 +75,13 @@ function handle_(data, callback) {
   var action = String((data && data.action) || "health");
   try {
     if (action === "health") {
-      return respond_({ ok: true, ready: pinConfigured_() }, callback);
+      return respond_({ ok: true, ready: pinConfigured_(), actions: ACTIONS }, callback);
     }
-    if (action !== "approve" && action !== "reject") {
-      return respond_({ ok: false, error: "Ação desconhecida." }, callback);
+    if (ACTIONS.indexOf(action) === -1) {
+      return respond_({ ok: false, error: "Ação desconhecida.", actions: ACTIONS }, callback);
     }
     assertPin_(data.pin);
-    var result = action === "approve" ? approve_(data) : reject_(data);
+    var result = action === "approve" ? approve_(data) : action === "reject" ? reject_(data) : complete_(data);
     return respond_(result, callback);
   } catch (err) {
     return respond_({
@@ -151,6 +154,129 @@ function reject_(data) {
     }
     return { ok: true, id: found.id, status: STATUS_REJECTED };
   });
+}
+
+function complete_(data) {
+  return withLock_(function () {
+    var id = String(data.id || "").trim();
+    if (!/^P-\d+$/i.test(id)) fail_("Informe um ID no formato P-01.", "id");
+    var ss = SpreadsheetApp.getActive();
+    var tracking = ss.getSheetByName(TRACKING_SHEET);
+    if (!tracking) fail_("Não encontrei a aba Acompanhamento.", "sheet");
+    var found = findTrackingItem_(tracking, id);
+    var name = cleanText_(data.name, 80);
+    var comment = cleanText_(data.comment, 2000);
+    var alreadyDone = fold_(found.status).indexOf("conclu") !== -1;
+    if (found.statusCol) tracking.getRange(found.row, found.statusCol).setValue(STATUS_DONE);
+    if (found.dueCol) tracking.getRange(found.row, found.dueCol).setValue(today_()).setNumberFormat("dd/MM/yyyy");
+    var realizadasId = appendRealizadas_(ss, {
+      id: found.id,
+      title: found.title,
+      detail: found.detail,
+      name: name,
+      comment: comment,
+    });
+    return {
+      ok: true,
+      id: found.id,
+      status: STATUS_DONE,
+      realizadasId: realizadasId,
+      already: alreadyDone,
+    };
+  });
+}
+
+function findTrackingItem_(sheet, id) {
+  var headerRow = findTrackingHeaderRow_(sheet);
+  var width = Math.max(sheet.getLastColumn(), 7);
+  var headers = sheet.getRange(headerRow, 1, 1, width).getDisplayValues()[0];
+  var demandaCol = columnBy_(headers, function (label) { return label === "demanda" || endsWith_(label, " demanda"); });
+  if (!demandaCol) fail_("Não encontrei a coluna Demanda em Acompanhamento.", "format");
+  var idCol = findIdColumn_(headers, demandaCol);
+  var statusCol = columnBy_(headers, function (label) { return label === "situacao" || label.indexOf("situacao") !== -1; });
+  var dueCol = columnBy_(headers, function (label) { return label.indexOf("conclus") !== -1; });
+  var nextCol = columnBy_(headers, function (label) { return label.indexOf("proximo") !== -1; });
+  var last = Math.max(sheet.getLastRow(), headerRow);
+  var values = sheet.getRange(headerRow + 1, 1, Math.max(last - headerRow, 1), width).getDisplayValues();
+  var wanted = id.toUpperCase();
+  for (var i = 0; i < values.length; i++) {
+    var current = String(values[i][idCol - 1] || "").trim();
+    if (current.toUpperCase() !== wanted) continue;
+    return {
+      row: headerRow + 1 + i,
+      id: current,
+      title: String(values[i][demandaCol - 1] || "").trim(),
+      detail: nextCol ? String(values[i][nextCol - 1] || "").trim() : "",
+      status: statusCol ? String(values[i][statusCol - 1] || "").trim() : "",
+      statusCol: statusCol,
+      dueCol: dueCol,
+    };
+  }
+  fail_("Não encontrei a demanda " + id + " em Acompanhamento.", "missing");
+}
+
+function appendRealizadas_(ss, item) {
+  var sheet = ss.getSheetByName(DONE_SHEET);
+  if (!sheet) fail_("Não encontrei a aba Realizadas.", "sheet");
+  var layout = realizadasLayout_(sheet);
+  if (realizadasHasId_(sheet, layout, item.id)) return item.id;
+  var row = Math.max(sheet.getLastRow(), layout.headerRow) + 1;
+  var width = Math.max(layout.note, sheet.getLastColumn(), 10);
+  sheet.getRange(row, 1, 1, width).clearFormat().clearDataValidations();
+  sheet.getRange(row, 1, 1, width).setFontWeight("normal").setFontColor("#1a2420").setBackground(null).setWrap(true);
+  sheet.getRange(row, layout.id).setValue(item.id);
+  sheet.getRange(row, layout.title).setValue(item.title || item.id);
+  sheet.getRange(row, layout.explain).setValue(item.detail || item.title || "");
+  sheet.getRange(row, layout.system).setValue("Eventos UJUMP");
+  sheet.getRange(row, layout.date).setValue(today_()).setNumberFormat("dd/MM/yyyy");
+  sheet.getRange(row, layout.status).setValue(STATUS_DONE);
+  var notes = [];
+  if (item.name) notes.push("Concluído por " + item.name + ".");
+  else notes.push("Concluído no aplicativo.");
+  if (item.comment) notes.push(item.comment);
+  sheet.getRange(row, layout.note).setValue(notes.join("\n"));
+  return item.id;
+}
+
+function realizadasLayout_(sheet) {
+  var rows = Math.min(Math.max(sheet.getLastRow(), 1), 8);
+  var cols = Math.max(sheet.getLastColumn(), 10);
+  var values = sheet.getRange(1, 1, rows, cols).getDisplayValues();
+  for (var r = 0; r < values.length; r++) {
+    var idCol = 0;
+    var titleCol = 0;
+    for (var c = 0; c < values[r].length; c++) {
+      var label = fold_(values[r][c]);
+      if (label === "id") idCol = c + 1;
+      if (label === "atualizacao") titleCol = c + 1;
+    }
+    if (idCol && titleCol) {
+      return {
+        headerRow: r + 1,
+        id: idCol,
+        title: idCol + 1,
+        explain: idCol + 2,
+        level: idCol + 3,
+        points: idCol + 4,
+        system: idCol + 5,
+        date: idCol + 6,
+        status: idCol + 7,
+        note: idCol + 8,
+      };
+    }
+  }
+  return { headerRow: 3, id: 2, title: 3, explain: 4, level: 5, points: 6, system: 7, date: 8, status: 9, note: 10 };
+}
+
+function realizadasHasId_(sheet, layout, id) {
+  var last = sheet.getLastRow();
+  if (last <= layout.headerRow) return false;
+  var values = sheet.getRange(layout.headerRow + 1, layout.id, last - layout.headerRow, 1).getDisplayValues();
+  var wanted = String(id || "").trim().toUpperCase();
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i][0] || "").trim().toUpperCase() === wanted) return true;
+  }
+  return false;
 }
 
 function appendTrackingItem_(request, comment) {

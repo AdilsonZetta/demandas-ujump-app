@@ -291,7 +291,18 @@ h1 {
   background: transparent;
   color: var(--ink);
 }
-.btn-approve:disabled, .btn-reject:disabled { opacity: 0.45; }
+.btn-approve:disabled, .btn-reject:disabled, .btn-complete:disabled { opacity: 0.45; }
+.btn-complete {
+  display: block;
+  width: calc(100% - 28px);
+  margin: 0 14px 14px;
+  min-height: 46px;
+  border: 0;
+  border-radius: 14px;
+  background: #1f6b45;
+  color: #fff;
+  font-weight: 750;
+}
 
 .linkish {
   margin: 0;

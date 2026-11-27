@@ -2,7 +2,7 @@
    A planilha pública não envia CORS. O app carrega o gviz como script.
    Rede primeiro: com internet, a resposta nova segue para a página.
    Sem rede, devolve o último script confirmado e, se faltar, o modelo salvo. */
-var SHELL_CACHE = "ujump-shell-v4";
+var SHELL_CACHE = "ujump-shell-v5";
 var DATA_CACHE = "ujump-data-v1";
 var SHELL_FILES = [
   "index.html",
